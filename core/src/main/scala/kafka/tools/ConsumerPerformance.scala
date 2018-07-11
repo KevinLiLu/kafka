@@ -64,7 +64,7 @@ object ConsumerPerformance {
       val consumer = new KafkaConsumer[Array[Byte], Array[Byte]](config.props)
       consumer.subscribe(Collections.singletonList(config.topic))
       startMs = System.currentTimeMillis
-      consume(consumer, List(config.topic), config.numMessages, 1000, config, totalMessagesRead, totalBytesRead)
+      consume(consumer, List(config.topic), config.numMessages, config.timeout, config, totalMessagesRead, totalBytesRead)
       endMs = System.currentTimeMillis
       consumer.close()
     } else {
@@ -99,6 +99,7 @@ object ConsumerPerformance {
   }
 
   def consume(consumer: KafkaConsumer[Array[Byte], Array[Byte]], topics: List[String], count: Long, timeout: Long, config: ConsumerPerfConfig, totalMessagesRead: AtomicLong, totalBytesRead: AtomicLong) {
+    println("timeout: " + timeout)
     var bytesRead = 0L
     var messagesRead = 0L
     var lastBytesRead = 0L
@@ -150,6 +151,9 @@ object ConsumerPerformance {
         }
       }
     }
+
+    if (currentTimeMillis - lastConsumedTime > timeout)
+      println("[ERROR] Consumer hit timeout! currentTimeMillis=%s, lastConsumedTime=%s, timeout=%s".format(currentTimeMillis, lastConsumedTime, timeout))
 
     totalMessagesRead.set(messagesRead)
     totalBytesRead.set(bytesRead)
@@ -210,6 +214,11 @@ object ConsumerPerformance {
       .withRequiredArg
       .describedAs("config file")
       .ofType(classOf[String])
+    val timeoutOpt = parser.accepts("timeout", "Consume timeout.")
+      .withRequiredArg()
+      .describedAs("time in milliseconds")
+      .ofType(classOf[java.lang.Long])
+      .defaultsTo(1000L)
 
     val options = parser.parse(args: _*)
 
@@ -255,6 +264,7 @@ object ConsumerPerformance {
     val showDetailedStats = options.has(showDetailedStatsOpt)
     val dateFormat = new SimpleDateFormat(options.valueOf(dateFormatOpt))
     val hideHeader = options.has(hideHeaderOpt)
+    val timeout = options.valueOf(timeoutOpt).longValue
   }
 
   class ConsumerPerfThread(threadId: Int, name: String, stream: KafkaStream[Array[Byte], Array[Byte]],
