@@ -571,10 +571,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     private volatile boolean closed = false;
     private List<PartitionAssignor> assignors;
 
-    // currentThread holds the threadId of the current thread accessing KafkaConsumer
+    // currentThreadId holds the threadId of the current thread accessing KafkaConsumer
     // and is used to prevent multi-threaded access
-    private final AtomicLong currentThread = new AtomicLong(NO_CURRENT_THREAD);
-    // refcount is used to allow reentrant access by the thread who has acquired currentThread
+    private final AtomicLong currentThreadId = new AtomicLong(NO_CURRENT_THREAD);
+    private String currentThreadName;
+    // refcount is used to allow reentrant access by the thread who has acquired currentThreadId
     private final AtomicInteger refcount = new AtomicInteger(0);
 
     // to keep from repeatedly scanning subscriptions in poll(), cache the result during metadata updates
@@ -2212,9 +2213,16 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws ConcurrentModificationException if another thread already has the lock
      */
     private void acquire() {
-        long threadId = Thread.currentThread().getId();
-        if (threadId != currentThread.get() && !currentThread.compareAndSet(NO_CURRENT_THREAD, threadId))
-            throw new ConcurrentModificationException("KafkaConsumer is not safe for multi-threaded access");
+        Thread thread = Thread.currentThread();
+        long threadId = thread.getId();
+        if (threadId != currentThreadId.get() && !currentThreadId.compareAndSet(NO_CURRENT_THREAD, threadId))
+            throw new ConcurrentModificationException(
+                    String.format(
+                            "KafkaConsumer is not safe for multi-threaded access " +
+                                    "currentThreadId: %s currentThreadName: %s newThreadId: %s newThreadName: %s",
+                            currentThreadId, currentThreadName, threadId, thread.getName()
+                    ));
+        currentThreadName = thread.getName();
         refcount.incrementAndGet();
     }
 
@@ -2223,7 +2231,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      */
     private void release() {
         if (refcount.decrementAndGet() == 0)
-            currentThread.set(NO_CURRENT_THREAD);
+            currentThreadId.set(NO_CURRENT_THREAD);
     }
 
     private void throwIfNoAssignorsConfigured() {
